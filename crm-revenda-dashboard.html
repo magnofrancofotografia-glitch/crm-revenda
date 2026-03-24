@@ -629,8 +629,8 @@
     <div class="dash-controls">
       <select id="filter-vendedor" onchange="applyFilters()">
         <option value="">Todas as Vendedoras</option>
-        <option value="talita">Talita</option>
-        <option value="kauane">Kauane</option>
+        <option value="15596301828">Talita da Costa</option>
+        <option value="15596417799">Kauane de Souza</option>
       </select>
       <input type="date" id="date-inicio" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 14px;color:var(--text);font-family:'Syne',sans-serif;font-size:13px;">
       <input type="date" id="date-fim" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 14px;color:var(--text);font-family:'Syne',sans-serif;font-size:13px;">
@@ -696,7 +696,7 @@ const CLIENT_ID = '0edffe70d990fa2a74b40d5fa9ea067598a74259';
 const CLIENT_SECRET = 'dbf50a8a7c1e4c247569de2b42227ead733be2b260c11d9b422ccaed08be';
 const REDIRECT_URI = 'https://crm-revenda.vercel.app';
 const BLING_AUTH_URL = 'https://www.bling.com.br/Api/v3/oauth/authorize';
-const BLING_API = '/api/bling?path=';
+const BLING_API = 'https://api.bling.com.br/Api/v3';
 
 let allPedidos = [];
 let vendedoresMap = {};
@@ -752,8 +752,7 @@ function getVendedoraNome(p) {
 
 function matchVendedora(p, filtro) {
   if (!filtro) return true;
-  const nome = getVendedoraNome(p).toLowerCase();
-  return nome.includes(filtro.toLowerCase());
+  return String(p.vendedor?.id) === String(filtro);
 }
 
 // ============================
@@ -811,14 +810,18 @@ async function fetchPedidos(dataInicio, dataFim) {
   let page = 1;
   let pedidos = [];
   let hasMore = true;
+  const VENDEDORAS = ['15596301828', '15596417799'];
 
-  while (hasMore) {
-    const params = new URLSearchParams({ pagina: page, limite: 100 });
-    if (dataInicio) params.set('dataInicio', dataInicio);
-    if (dataFim) params.set('dataFim', dataFim);
+  for (const idVendedor of VENDEDORAS) {
+    page = 1;
+    hasMore = true;
+    while (hasMore) {
+      const params = new URLSearchParams({ pagina: page, limite: 100, idVendedor });
+      if (dataInicio) params.set('dataInicio', dataInicio);
+      if (dataFim) params.set('dataFim', dataFim);
 
-    try {
-      const data = await blingGet(`/pedidos/vendas?${params}`);
+      try {
+        const data = await blingGet(`/pedidos/vendas?${params}`);
       const items = data.data || [];
       pedidos = pedidos.concat(items);
       hasMore = items.length === 100;
@@ -831,6 +834,7 @@ async function fetchPedidos(dataInicio, dataFim) {
       await new Promise(r => setTimeout(r, 400));
     } catch (e) {
       hasMore = false;
+    }
     }
   }
   return pedidos;

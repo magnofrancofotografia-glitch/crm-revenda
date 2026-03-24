@@ -12,15 +12,31 @@ export default async function handler(req, res) {
   await redis.connect();
 
   if (req.method === 'POST') {
-    const { pedidos, meta } = req.body;
+    const { pedidos, meta, saveToken, clear } = req.body;
+
+    if (saveToken) {
+      await redis.set('bling_token', saveToken);
+      await redis.disconnect();
+      return res.json({ ok: true });
+    }
+
+    if (clear) {
+      await redis.set('crm_pedidos', '[]');
+      await redis.set('crm_meta', '[]');
+      await redis.disconnect();
+      return res.json({ ok: true });
+    }
+
     const atual = JSON.parse(await redis.get('crm_pedidos') || '[]');
     const ids = new Set(atual.map(p => p.id));
     const novos = pedidos.filter(p => !ids.has(p.id));
     const merged = [...atual, ...novos];
     await redis.set('crm_pedidos', JSON.stringify(merged));
+
     const metas = JSON.parse(await redis.get('crm_meta') || '[]');
-    metas.push({ ...meta, novos: novos.length, salvoEm: new Date().toISOString() });
+    metas.push({ ...meta, novos: novos.length });
     await redis.set('crm_meta', JSON.stringify(metas));
+
     await redis.disconnect();
     return res.json({ ok: true, total: merged.length, novos: novos.length });
   }

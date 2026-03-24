@@ -704,43 +704,45 @@ let chartVendedor = null;
 let chartClientes = null;
 let accessToken = '';
 
-// CACHE ACUMULATIVO
-const CACHE_KEY = 'crm_pedidos_cache';
-const CACHE_META_KEY = 'crm_cache_meta';
-
-function getCache() {
-  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '[]'); } catch { return []; }
+// CACHE ACUMULATIVO — Redis na nuvem
+async function getCache() {
+  try {
+    const r = await fetch('/api/pedidos');
+    const d = await r.json();
+    vendedoresMap = vendedoresMap || {};
+    return { pedidos: d.pedidos || [], meta: d.meta || [] };
+  } catch { return { pedidos: [], meta: [] }; }
 }
 
-function getMeta() {
-  try { return JSON.parse(localStorage.getItem(CACHE_META_KEY) || '[]'); } catch { return []; }
+async function saveCache(pedidos, meta) {
+  await fetch('/api/pedidos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pedidos, meta })
+  });
 }
 
-function saveCache(pedidos, meta) {
-  localStorage.setItem(CACHE_KEY, JSON.stringify(pedidos));
-  localStorage.setItem(CACHE_META_KEY, JSON.stringify(meta));
-}
-
-function limparCache() {
-  if (!confirm('Limpar todos os dados salvos?')) return;
-  localStorage.removeItem(CACHE_KEY);
-  localStorage.removeItem(CACHE_META_KEY);
+async function limparCache() {
+  if (!confirm('Limpar todos os dados salvos no servidor?')) return;
+  await fetch('/api/pedidos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pedidos: [], meta: [], clear: true })
+  });
   allPedidos = [];
-  updateCacheInfo();
+  updateCacheInfo([]);
   renderDashboard([]);
 }
 
-function updateCacheInfo() {
-  const meta = getMeta();
-  const cache = getCache();
+function updateCacheInfo(meta) {
   const el = document.getElementById('cache-info');
   if (!el) return;
-  if (meta.length === 0) {
+  if (!meta || meta.length === 0) {
     el.innerHTML = '⚠️ Nenhum dado salvo ainda. Selecione um período e clique em <strong style="color:var(--accent)">Buscar e Salvar</strong>.';
     return;
   }
-  const periodos = meta.map(m => `${m.inicio} → ${m.fim} (${m.total} pedidos)`).join(' | ');
-  el.innerHTML = `💾 Cache: <strong style="color:var(--accent)">${cache.length} pedidos salvos</strong> · Períodos: ${periodos}`;
+  const periodos = meta.map(m => `${m.inicio} → ${m.fim} (${m.novos || m.total || 0} novos)`).join(' | ');
+  el.innerHTML = `💾 <strong style="color:var(--accent)">${allPedidos.length} pedidos na nuvem</strong> · ${periodos}`;
 }
 
 function getVendedoraNome(p) {
@@ -847,22 +849,23 @@ async function buscarEAcumular() {
 
   try {
     const novos = await fetchPedidos(inicio, fim);
+    el.innerHTML = `⏳ Salvando ${novos.length} pedidos no servidor...`;
 
-    // Acumular sem duplicar (por id)
-    const cacheAtual = getCache();
-    const idsExistentes = new Set(cacheAtual.map(p => p.id));
-    const semDuplicatas = novos.filter(p => !idsExistentes.has(p.id));
-    const cacheNovo = [...cacheAtual, ...semDuplicatas];
+    const meta = { inicio, fim, total: novos.length, salvoEm: new Date().toLocaleString('pt-BR') };
+    const result = await fetch('/api/pedidos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pedidos: novos, meta })
+    });
+    const data = await result.json();
 
-    // Salvar meta
-    const metaAtual = getMeta();
-    metaAtual.push({ inicio, fim, total: novos.length, novos: semDuplicatas.length, salvoEm: new Date().toLocaleString('pt-BR') });
-
-    saveCache(cacheNovo, metaAtual);
-    allPedidos = cacheNovo;
-
-    updateCacheInfo();
+    // Recarregar tudo do servidor
+    const cache = await getCache();
+    allPedidos = cache.pedidos;
+    updateCacheInfo(cache.meta);
     applyFilters();
+
+    el.innerHTML = `✅ Salvo! ${data.novos} novos pedidos adicionados (total: ${data.total})`;
 
   } catch(e) {
     el.innerHTML = '❌ Erro ao buscar: ' + e.message;
@@ -899,9 +902,21 @@ async function initDashboard() {
   // Carregar vendedores
   vendedoresMap = await fetchVendedores();
 
-  // Carregar cache salvo
-  allPedidos = getCache();
-  updateCacheInfo();
+  // Carregar cache do servidor
+  const el = document.getElementById('cache-info');
+  if (el) el.innerHTML = '⏳ Carregando dados do servidor...';
+  const cache = await getCache();
+  allPedidos = cache.pedidos;
+  updateCacheInfo(cache.meta);
+
+  // Salvar token no Redis para cron job
+  if (accessToken) {
+    await fetch('/api/pedidos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ saveToken: accessToken })
+    }).catch(() => {});
+  }
 
   if (allPedidos.length > 0) {
     applyFilters();

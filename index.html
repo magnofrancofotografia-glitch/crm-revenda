@@ -806,15 +806,17 @@ async function blingGet(path) {
   return res.json();
 }
 
-async function fetchPedidos(dataInicio, dataFim) {
-  let page = 1;
-  let pedidos = [];
-  let hasMore = true;
-  const VENDEDORAS = ['15596301828', '15596417799'];
+const VENDEDORAS_IDS = {
+  '15596301828': 'Talita da Costa',
+  '15596417799': 'Kauane de Souza'
+};
 
-  for (const idVendedor of VENDEDORAS) {
-    page = 1;
-    hasMore = true;
+async function fetchPedidos(dataInicio, dataFim) {
+  let pedidos = [];
+
+  for (const [idVendedor, nomeVendedor] of Object.entries(VENDEDORAS_IDS)) {
+    let page = 1;
+    let hasMore = true;
     while (hasMore) {
       const params = new URLSearchParams({ pagina: page, limite: 100, idVendedor });
       if (dataInicio) params.set('dataInicio', dataInicio);
@@ -822,15 +824,16 @@ async function fetchPedidos(dataInicio, dataFim) {
 
       try {
         const data = await blingGet(`/pedidos/vendas?${params}`);
-      const items = data.data || [];
+      const items = (data.data || []).map(p => ({
+        ...p,
+        vendedor: { id: idVendedor, nome: nomeVendedor }
+      }));
       pedidos = pedidos.concat(items);
       hasMore = items.length === 100;
       page++;
-      // update progress
       const el = document.getElementById('cache-info');
-      if (el) el.innerHTML = `⏳ Buscando página ${page}... (${pedidos.length} pedidos encontrados)`;
+      if (el) el.innerHTML = `⏳ ${nomeVendedor} — página ${page} (${pedidos.length} pedidos)`;
       if (page > 50) break;
-      // respeitar rate limit do Bling: 3 req/seg
       await new Promise(r => setTimeout(r, 400));
     } catch (e) {
       hasMore = false;

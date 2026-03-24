@@ -1,5 +1,6 @@
 import { createClient } from 'redis';
 
+const VENDEDORAS = ['15596301828', '15596417799'];
 const getRedis = () => createClient({ url: process.env.REDIS_URL });
 
 export default async function handler(req, res) {
@@ -27,14 +28,19 @@ export default async function handler(req, res) {
       return res.json({ ok: true });
     }
 
+    // Filtrar só Talita e Kauane
+    const filtrados = pedidos.filter(p => 
+      p.vendedor && VENDEDORAS.includes(String(p.vendedor.id))
+    );
+
     const atual = JSON.parse(await redis.get('crm_pedidos') || '[]');
     const ids = new Set(atual.map(p => p.id));
-    const novos = pedidos.filter(p => !ids.has(p.id));
+    const novos = filtrados.filter(p => !ids.has(p.id));
     const merged = [...atual, ...novos];
     await redis.set('crm_pedidos', JSON.stringify(merged));
 
     const metas = JSON.parse(await redis.get('crm_meta') || '[]');
-    metas.push({ ...meta, novos: novos.length });
+    metas.push({ ...meta, novos: novos.length, total: merged.length });
     await redis.set('crm_meta', JSON.stringify(metas));
 
     await redis.disconnect();

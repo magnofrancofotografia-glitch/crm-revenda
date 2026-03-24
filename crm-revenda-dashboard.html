@@ -618,12 +618,7 @@
     <div id="token-error"></div>
   </div>
 
-  <div style="margin-top: 24px; text-align:center;">
-    <div style="font-size:12px; color:var(--muted); font-family:'Space Mono',monospace; line-height:1.8;">
-      Client ID: <span style="color:var(--accent)">933a99a0...4c1f38b6</span><br>
-      Callback: <span style="color:var(--accent)">rigolim-dash.vercel.app/api/callback</span>
-    </div>
-  </div>
+
 </div>
 
 <!-- DASHBOARD SCREEN -->
@@ -633,18 +628,19 @@
     <div class="dash-title">Frequência de Compras</div>
     <div class="dash-controls">
       <select id="filter-vendedor" onchange="applyFilters()">
-        <option value="">Todos os Vendedores</option>
+        <option value="">Todas as Vendedoras</option>
+        <option value="talita">Talita</option>
+        <option value="kauane">Kauane</option>
       </select>
-      <select id="filter-periodo" onchange="applyFilters()">
-        <option value="90">Últimos 90 dias</option>
-        <option value="180">Últimos 180 dias</option>
-        <option value="365">Último ano</option>
-        <option value="0">Todo período</option>
-      </select>
-      <button class="btn btn-secondary" onclick="refreshData()">↻ Atualizar</button>
+      <input type="date" id="date-inicio" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 14px;color:var(--text);font-family:'Syne',sans-serif;font-size:13px;">
+      <input type="date" id="date-fim" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 14px;color:var(--text);font-family:'Syne',sans-serif;font-size:13px;">
+      <button class="btn btn-primary" style="padding:9px 18px" onclick="buscarEAcumular()">⬇ Buscar e Salvar</button>
+      <button class="btn btn-secondary" onclick="applyFilters()">↻ Filtrar</button>
+      <button class="btn btn-secondary" onclick="limparCache()">🗑 Limpar Cache</button>
       <button class="btn btn-danger" onclick="logout()">Sair</button>
     </div>
   </div>
+  <div id="cache-info" style="margin-bottom:16px; font-family:'Space Mono',monospace; font-size:11px; color:var(--muted); padding:10px 0;"></div>
 
   <!-- KPIs -->
   <div class="kpi-grid" id="kpi-grid">
@@ -708,6 +704,56 @@ let chartVendedor = null;
 let chartClientes = null;
 let accessToken = '';
 
+// CACHE ACUMULATIVO
+const CACHE_KEY = 'crm_pedidos_cache';
+const CACHE_META_KEY = 'crm_cache_meta';
+
+function getCache() {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '[]'); } catch { return []; }
+}
+
+function getMeta() {
+  try { return JSON.parse(localStorage.getItem(CACHE_META_KEY) || '[]'); } catch { return []; }
+}
+
+function saveCache(pedidos, meta) {
+  localStorage.setItem(CACHE_KEY, JSON.stringify(pedidos));
+  localStorage.setItem(CACHE_META_KEY, JSON.stringify(meta));
+}
+
+function limparCache() {
+  if (!confirm('Limpar todos os dados salvos?')) return;
+  localStorage.removeItem(CACHE_KEY);
+  localStorage.removeItem(CACHE_META_KEY);
+  allPedidos = [];
+  updateCacheInfo();
+  renderDashboard([]);
+}
+
+function updateCacheInfo() {
+  const meta = getMeta();
+  const cache = getCache();
+  const el = document.getElementById('cache-info');
+  if (!el) return;
+  if (meta.length === 0) {
+    el.innerHTML = '⚠️ Nenhum dado salvo ainda. Selecione um período e clique em <strong style="color:var(--accent)">Buscar e Salvar</strong>.';
+    return;
+  }
+  const periodos = meta.map(m => `${m.inicio} → ${m.fim} (${m.total} pedidos)`).join(' | ');
+  el.innerHTML = `💾 Cache: <strong style="color:var(--accent)">${cache.length} pedidos salvos</strong> · Períodos: ${periodos}`;
+}
+
+function getVendedoraNome(p) {
+  const id = p.vendedor?.id || null;
+  return vendedoresMap[id] || '';
+}
+
+function matchVendedora(p, filtro) {
+  if (!filtro) return true;
+  const nome = getVendedoraNome(p).toLowerCase();
+  return nome.includes(filtro.toLowerCase());
+}
+
 // ============================
 // AUTH
 // ============================
@@ -759,7 +805,7 @@ async function blingGet(path) {
   return res.json();
 }
 
-async function fetchPedidos(dataInicio) {
+async function fetchPedidos(dataInicio, dataFim) {
   let page = 1;
   let pedidos = [];
   let hasMore = true;
@@ -767,6 +813,7 @@ async function fetchPedidos(dataInicio) {
   while (hasMore) {
     const params = new URLSearchParams({ pagina: page, limite: 100 });
     if (dataInicio) params.set('dataInicio', dataInicio);
+    if (dataFim) params.set('dataFim', dataFim);
 
     try {
       const data = await blingGet(`/pedidos/vendas?${params}`);
@@ -774,12 +821,52 @@ async function fetchPedidos(dataInicio) {
       pedidos = pedidos.concat(items);
       hasMore = items.length === 100;
       page++;
-      if (page > 20) break; // safety limit 2000 pedidos
+      // update progress
+      const el = document.getElementById('cache-info');
+      if (el) el.innerHTML = `⏳ Buscando página ${page}... (${pedidos.length} pedidos encontrados)`;
+      if (page > 50) break;
+      // respeitar rate limit do Bling: 3 req/seg
+      await new Promise(r => setTimeout(r, 400));
     } catch (e) {
       hasMore = false;
     }
   }
   return pedidos;
+}
+
+async function buscarEAcumular() {
+  const inicio = document.getElementById('date-inicio').value;
+  const fim = document.getElementById('date-fim').value;
+  if (!inicio || !fim) {
+    alert('Selecione a data de início e fim!');
+    return;
+  }
+
+  const el = document.getElementById('cache-info');
+  el.innerHTML = '⏳ Buscando pedidos no Bling...';
+
+  try {
+    const novos = await fetchPedidos(inicio, fim);
+
+    // Acumular sem duplicar (por id)
+    const cacheAtual = getCache();
+    const idsExistentes = new Set(cacheAtual.map(p => p.id));
+    const semDuplicatas = novos.filter(p => !idsExistentes.has(p.id));
+    const cacheNovo = [...cacheAtual, ...semDuplicatas];
+
+    // Salvar meta
+    const metaAtual = getMeta();
+    metaAtual.push({ inicio, fim, total: novos.length, novos: semDuplicatas.length, salvoEm: new Date().toLocaleString('pt-BR') });
+
+    saveCache(cacheNovo, metaAtual);
+    allPedidos = cacheNovo;
+
+    updateCacheInfo();
+    applyFilters();
+
+  } catch(e) {
+    el.innerHTML = '❌ Erro ao buscar: ' + e.message;
+  }
 }
 
 async function fetchVendedores() {
@@ -803,62 +890,42 @@ async function initDashboard() {
     <button class="btn btn-danger" onclick="logout()">Sair</button>
   `;
 
-  showTableLoading();
-  showKpiLoading();
+  // Setar datas padrão (últimos 30 dias)
+  const hoje = new Date();
+  const h30 = new Date(); h30.setDate(h30.getDate() - 30);
+  document.getElementById('date-fim').value = hoje.toISOString().substring(0,10);
+  document.getElementById('date-inicio').value = h30.toISOString().substring(0,10);
 
-  try {
-    // 90 dias por padrão
-    const periodo = parseInt(document.getElementById('filter-periodo')?.value || '90');
-    const dataInicio = periodo > 0 ? getDateStr(periodo) : '';
-    document.getElementById('chart-period-label').textContent = periodo > 0 ? `(${periodo}d)` : '(tudo)';
+  // Carregar vendedores
+  vendedoresMap = await fetchVendedores();
 
-    const [pedidosRaw, vendMap] = await Promise.all([
-      fetchPedidos(dataInicio),
-      fetchVendedores()
-    ]);
+  // Carregar cache salvo
+  allPedidos = getCache();
+  updateCacheInfo();
 
-    vendedoresMap = vendMap;
-    allPedidos = pedidosRaw;
-
-    // Populate vendedor filter
-    const vendedoresUnicos = [...new Set(pedidosRaw.map(p => getVendedorId(p)).filter(Boolean))];
-    const sel = document.getElementById('filter-vendedor');
-    sel.innerHTML = '<option value="">Todos os Vendedores</option>';
-    vendedoresUnicos.forEach(id => {
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = vendMap[id] || `ID ${id}`;
-      sel.appendChild(opt);
-    });
-
-    renderDashboard(pedidosRaw);
-
-  } catch (e) {
-    showError('Erro ao carregar dados: ' + e.message + '. Verifique se o token é válido e tem permissões de leitura.');
+  if (allPedidos.length > 0) {
+    applyFilters();
+  } else {
+    showKpiLoading();
+    document.getElementById('kpi-grid').innerHTML = `<div style="grid-column:1/-1; font-family:'Space Mono',monospace; font-size:13px; color:var(--muted); padding:20px 0;">Nenhum dado salvo. Selecione um período e clique em <strong style="color:var(--accent)">Buscar e Salvar</strong>.</div>`;
+    document.getElementById('table-body').innerHTML = `<tr><td colspan="8" style="text-align:center; padding:40px; color:var(--muted); font-family:'Space Mono',monospace; font-size:12px">Selecione um período e clique em Buscar e Salvar.</td></tr>`;
   }
 }
 
 // ============================
 // FILTERS
 // ============================
-async function applyFilters() {
-  const periodo = parseInt(document.getElementById('filter-periodo').value || '90');
-  const vendedorId = document.getElementById('filter-vendedor').value;
-  const dataInicio = periodo > 0 ? getDateStr(periodo) : '';
-  document.getElementById('chart-period-label').textContent = periodo > 0 ? `(${periodo}d)` : '(tudo)';
-
-  showTableLoading();
-  showKpiLoading();
-
-  const pedidos = await fetchPedidos(dataInicio);
-  allPedidos = pedidos;
-
-  const filtered = vendedorId ? pedidos.filter(p => String(getVendedorId(p)) === String(vendedorId)) : pedidos;
+function applyFilters() {
+  const vendedora = document.getElementById('filter-vendedor').value;
+  const filtered = vendedora
+    ? allPedidos.filter(p => matchVendedora(p, vendedora))
+    : allPedidos;
+  document.getElementById('chart-period-label').textContent = `(${allPedidos.length} total)`;
   renderDashboard(filtered);
 }
 
 async function refreshData() {
-  await applyFilters();
+  await buscarEAcumular();
 }
 
 // ============================

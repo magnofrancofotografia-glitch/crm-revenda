@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CRM Clientes Revenda · Bling</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
 <style>
   :root {
     --bg: #0a0c10;
@@ -647,15 +647,15 @@
     <div class="loading"><div class="spinner"></div></div>
   </div>
 
-  <!-- CHARTS -->
+  <!-- STATS -->
   <div class="charts-row">
     <div class="card">
-      <div class="card-title">Pedidos por Vendedor <span id="chart-period-label"></span></div>
-      <canvas id="chart-vendedor" height="220"></canvas>
+      <div class="card-title">Pedidos por Vendedora <span id="chart-period-label"></span></div>
+      <div id="chart-vendedor"></div>
     </div>
     <div class="card">
-      <div class="card-title">Top Clientes (Frequência) <span>nº de pedidos</span></div>
-      <canvas id="chart-clientes" height="220"></canvas>
+      <div class="card-title">Top 10 Clientes <span>por frequência</span></div>
+      <div id="chart-clientes"></div>
     </div>
   </div>
 
@@ -696,12 +696,10 @@ const CLIENT_ID = '0edffe70d990fa2a74b40d5fa9ea067598a74259';
 const CLIENT_SECRET = 'dbf50a8a7c1e4c247569de2b42227ead733be2b260c11d9b422ccaed08be';
 const REDIRECT_URI = 'https://crm-revenda.vercel.app';
 const BLING_AUTH_URL = 'https://www.bling.com.br/Api/v3/oauth/authorize';
-const BLING_API = '/api/bling?path=';
+const BLING_API = 'https://api.bling.com.br/Api/v3';
 
 let allPedidos = [];
 let vendedoresMap = {};
-let chartVendedor = null;
-let chartClientes = null;
 let accessToken = '';
 
 // CACHE ACUMULATIVO — Redis na nuvem
@@ -799,10 +797,7 @@ function showTokenError(msg) {
 // API CALLS
 // ============================
 async function blingGet(path) {
-  // Converte /pedidos/vendas?a=1&b=2 → /api/bling?path=pedidos/vendas&a=1&b=2
-  const [endpoint, qs] = path.replace(/^\//, '').split('?');
-  const url = `/api/bling?path=${endpoint}${qs ? '&' + qs : ''}`;
-  const res = await fetch(url, {
+  const res = await fetch(`${BLING_API}${path}`, {
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
   });
   if (!res.ok) throw new Error(`API ${path} → ${res.status}: ${res.statusText}`);
@@ -1015,54 +1010,40 @@ function renderDashboard(pedidos) {
     </div>
   `;
 
-  // Chart Vendedor
+  // Vendedoras stats — HTML bars
   const vendedorStats = {};
   pedidos.forEach(p => {
-    const vNome = vendedoresMap[getVendedorId(p)] || '—';
+    const vNome = p.vendedor?.nome || vendedoresMap[getVendedorId(p)] || '—';
     vendedorStats[vNome] = (vendedorStats[vNome] || 0) + 1;
   });
-  const vLabels = Object.keys(vendedorStats).sort((a,b) => vendedorStats[b] - vendedorStats[a]).slice(0, 10);
-  const vData = vLabels.map(l => vendedorStats[l]);
+  const vEntries = Object.entries(vendedorStats).sort((a,b) => b[1]-a[1]);
+  const vMax = vEntries[0]?.[1] || 1;
+  document.getElementById('chart-vendedor').innerHTML = vEntries.map(([nome, qtd]) => `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--text)">${escHtml(nome)}</span>
+        <span style="color:var(--accent);font-family:'Space Mono',monospace">${qtd}</span>
+      </div>
+      <div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${Math.round(qtd/vMax*100)}%;background:var(--accent);border-radius:4px;transition:width 0.6s"></div>
+      </div>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:12px">Sem dados</div>';
 
-  if (chartVendedor) chartVendedor.destroy();
-  const ctx1 = document.getElementById('chart-vendedor').getContext('2d');
-  chartVendedor = new Chart(ctx1, {
-    type: 'bar',
-    data: {
-      labels: vLabels,
-      datasets: [{ data: vData, backgroundColor: 'rgba(0,229,160,0.7)', borderRadius: 6, borderSkipped: false }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#5a6075', font: { family: 'Space Mono', size: 11 } }, grid: { color: 'rgba(30,34,48,0.8)' } },
-        y: { ticks: { color: '#5a6075', font: { family: 'Space Mono', size: 11 } }, grid: { color: 'rgba(30,34,48,0.8)' } }
-      }
-    }
-  });
-
-  // Chart Top Clientes
-  const topClientes = clientes.slice(0, 8);
-  if (chartClientes) chartClientes.destroy();
-  const ctx2 = document.getElementById('chart-clientes').getContext('2d');
-  chartClientes = new Chart(ctx2, {
-    type: 'doughnut',
-    data: {
-      labels: topClientes.map(c => c.nome.length > 20 ? c.nome.substring(0,20)+'…' : c.nome),
-      datasets: [{
-        data: topClientes.map(c => c.pedidos),
-        backgroundColor: ['#00e5a0','#0070f3','#ff6b35','#a855f7','#ec4899','#14b8a6','#f59e0b','#6366f1'],
-        borderWidth: 2, borderColor: '#111318'
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'right', labels: { color: '#5a6075', font: { family: 'Space Mono', size: 10 }, boxWidth: 12, padding: 10 } }
-      }
-    }
-  });
+  // Top clientes — HTML list
+  const topClientes = clientes.slice(0, 10);
+  const tcMax = topClientes[0]?.pedidos || 1;
+  const colors = ['#00e5a0','#0070f3','#ff6b35','#a855f7','#ec4899','#14b8a6','#f59e0b','#6366f1','#ef4444','#84cc16'];
+  document.getElementById('chart-clientes').innerHTML = topClientes.map((c, i) => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="width:8px;height:8px;border-radius:50%;background:${colors[i]};flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)">${escHtml(c.nome)}</div>
+        <div style="height:4px;background:var(--surface2);border-radius:2px;margin-top:3px">
+          <div style="height:100%;width:${Math.round(c.pedidos/tcMax*100)}%;background:${colors[i]};border-radius:2px"></div>
+        </div>
+      </div>
+      <span style="font-family:'Space Mono',monospace;font-size:12px;color:${colors[i]};flex-shrink:0">${c.pedidos}x</span>
+    </div>`).join('') || '<div style="color:var(--muted);font-size:12px">Sem dados</div>';
 
   // Table
   document.getElementById('table-count').textContent = `${clientes.length} clientes`;

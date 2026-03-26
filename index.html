@@ -818,7 +818,8 @@ async function fetchPedidos(dataInicio, dataFim) {
     let page = 1;
     let hasMore = true;
     while (hasMore) {
-      const params = new URLSearchParams({ pagina: page, limite: 100, idLoja });
+      const params = new URLSearchParams({ pagina: page, limite: 100 });
+      params.set('idLoja', idLoja);
       if (dataInicio) params.set('dataInicio', dataInicio);
       if (dataFim) params.set('dataFim', dataFim);
 

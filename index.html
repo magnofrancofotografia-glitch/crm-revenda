@@ -834,7 +834,7 @@ async function fetchPedidos(dataInicio, dataFim) {
       const el = document.getElementById('cache-info');
       if (el) el.innerHTML = `⏳ ${nomeVendedor} — página ${page} (${pedidos.length} pedidos)`;
       if (page > 50) break;
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 700));
     } catch (e) {
       hasMore = false;
     }

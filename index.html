@@ -806,19 +806,19 @@ async function blingGet(path) {
   return res.json();
 }
 
-const VENDEDORAS_IDS = {
-  '15596301828': 'Talita da Costa',
-  '15596417799': 'Kauane de Souza'
+const LOJAS = {
+  '204907805': 'Talita da Costa',
+  '205077747': 'Kauane de Souza'
 };
 
 async function fetchPedidos(dataInicio, dataFim) {
   let pedidos = [];
 
-  for (const [idVendedor, nomeVendedor] of Object.entries(VENDEDORAS_IDS)) {
+  for (const [idLoja, nomeVendedor] of Object.entries(LOJAS)) {
     let page = 1;
     let hasMore = true;
     while (hasMore) {
-      const params = new URLSearchParams({ pagina: page, limite: 100, idVendedor });
+      const params = new URLSearchParams({ pagina: page, limite: 100, idLoja });
       if (dataInicio) params.set('dataInicio', dataInicio);
       if (dataFim) params.set('dataFim', dataFim);
 

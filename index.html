@@ -796,12 +796,28 @@ function showTokenError(msg) {
 // ============================
 // API CALLS
 // ============================
-async function blingGet(path) {
+async function refreshToken() {
+  const r = await fetch('/api/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+  const d = await r.json();
+  if (d.access_token) {
+    accessToken = d.access_token;
+    localStorage.setItem('bling_token', accessToken);
+    return true;
+  }
+  return false;
+}
+
+async function blingGet(path, retry = true) {
   const [endpoint, qs] = path.replace(/^\//, '').split('?');
   const url = `/api/bling?path=${endpoint}${qs ? '&' + qs : ''}`;
   const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
   });
+  if (res.status === 401 && retry) {
+    const ok = await refreshToken();
+    if (ok) return blingGet(path, false);
+    throw new Error('Token expirado — faça login novamente');
+  }
   if (!res.ok) throw new Error(`API ${path} → ${res.status}: ${res.statusText}`);
   return res.json();
 }

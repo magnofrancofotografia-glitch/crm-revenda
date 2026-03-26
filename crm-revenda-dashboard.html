@@ -696,7 +696,7 @@ const CLIENT_ID = '0edffe70d990fa2a74b40d5fa9ea067598a74259';
 const CLIENT_SECRET = 'dbf50a8a7c1e4c247569de2b42227ead733be2b260c11d9b422ccaed08be';
 const REDIRECT_URI = 'https://crm-revenda.vercel.app';
 const BLING_AUTH_URL = 'https://www.bling.com.br/Api/v3/oauth/authorize';
-const BLING_API = 'https://api.bling.com.br/Api/v3';
+const BLING_API = '/api/bling?path=';
 
 let allPedidos = [];
 let vendedoresMap = {};
@@ -799,7 +799,10 @@ function showTokenError(msg) {
 // API CALLS
 // ============================
 async function blingGet(path) {
-  const res = await fetch(`${BLING_API}${path}`, {
+  // Converte /pedidos/vendas?a=1&b=2 → /api/bling?path=pedidos/vendas&a=1&b=2
+  const [endpoint, qs] = path.replace(/^\//, '').split('?');
+  const url = `/api/bling?path=${endpoint}${qs ? '&' + qs : ''}`;
+  const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' }
   });
   if (!res.ok) throw new Error(`API ${path} → ${res.status}: ${res.statusText}`);

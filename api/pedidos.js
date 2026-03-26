@@ -1,9 +1,7 @@
 import { createClient } from 'redis';
 
-const VENDEDORAS = {
-  '15596301828': 'Talita da Costa',
-  '15596417799': 'Kauane de Souza'
-};
+const VENDEDORAS_IDS = ['15596301828', '15596417799'];
+const VENDEDORAS_NOMES = ['talita', 'kauane'];
 
 const getRedis = () => createClient({ url: process.env.REDIS_URL });
 
@@ -32,9 +30,17 @@ export default async function handler(req, res) {
       return res.json({ ok: true });
     }
 
+    // Filtrar só Talita e Kauane — por ID ou por nome
+    const filtrados = pedidos.filter(p => {
+      const vidId = String(p.vendedor?.id || '');
+      const vNome = (p.vendedor?.nome || '').toLowerCase();
+      return VENDEDORAS_IDS.includes(vidId) || 
+             VENDEDORAS_NOMES.some(n => vNome.includes(n));
+    });
+
     const atual = JSON.parse(await redis.get('crm_pedidos') || '[]');
     const ids = new Set(atual.map(p => p.id));
-    const novos = pedidos.filter(p => !ids.has(p.id));
+    const novos = filtrados.filter(p => !ids.has(p.id));
     const merged = [...atual, ...novos];
     await redis.set('crm_pedidos', JSON.stringify(merged));
 
